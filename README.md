@@ -268,6 +268,7 @@ cd WeGent
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
 pip install -e ".[dev]"
 ```
 
@@ -277,8 +278,11 @@ pip install -e ".[dev]"
 sudo yum install -y python3-virtualenv
 python3 -m virtualenv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
 pip install -e ".[dev]"
 ```
+
+如果执行 `pip install -e ".[dev]"` 提示 `Directory '.' is not installable. File 'setup.py' not found.`，通常是 `pip` 版本太旧，先执行上面的升级命令后再安装。
 
 ### 6. 写入配置
 
