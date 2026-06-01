@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WeGent 设置</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f6f7f9;
+      color: #172033;
+    }
+    body {
+      margin: 0;
+      padding: 24px 16px;
+    }
+    main {
+      max-width: 520px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 24px;
+      margin: 0 0 8px;
+    }
+    p {
+      color: #586274;
+      line-height: 1.6;
+    }
+    section {
+      background: #fff;
+      border: 1px solid #e2e6ee;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+    }
+    label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      font-weight: 600;
+    }
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 8px;
+      background: #1677ff;
+      color: #fff;
+      font-size: 16px;
+      padding: 11px 14px;
+      width: 100%;
+    }
+    button.secondary {
+      background: #e9edf5;
+      color: #172033;
+    }
+    input[type="checkbox"] {
+      width: 22px;
+      height: 22px;
+    }
+    .muted {
+      color: #6d7788;
+      font-size: 14px;
+    }
+    ul {
+      padding-left: 20px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>WeGent 设置</h1>
+    <p>这里是验证版设置页。正式版会通过公众号网页授权自动识别你的身份。</p>
+
+    <section>
+      <label>
+        OpenID
+        <input id="openid" placeholder="从链接参数带入" />
+      </label>
+      <p class="muted">测试时可在 URL 后添加 <code>?openid=你的OpenID</code>。</p>
+      <button id="load">加载设置</button>
+    </section>
+
+    <section>
+      <label>
+        长期记忆
+        <input id="memoryEnabled" type="checkbox" checked />
+      </label>
+      <p id="memoryCount" class="muted">尚未加载。</p>
+      <button id="save">保存记忆设置</button>
+      <button id="clear" class="secondary" style="margin-top: 10px;">清空记忆</button>
+    </section>
+
+    <section>
+      <strong>当前记忆</strong>
+      <ul id="memories"></ul>
+    </section>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const openidInput = document.querySelector("#openid");
+    const enabledInput = document.querySelector("#memoryEnabled");
+    const memoryCount = document.querySelector("#memoryCount");
+    const memoriesList = document.querySelector("#memories");
+    openidInput.value = params.get("openid") || "";
+
+    async function loadSettings() {
+      const openid = openidInput.value.trim();
+      if (!openid) return alert("请输入 OpenID");
+      const res = await fetch(`/api/users/${encodeURIComponent(openid)}/settings`);
+      const data = await res.json();
+      enabledInput.checked = data.memory_enabled;
+      memoryCount.textContent = `共 ${data.memory_count} 条长期记忆`;
+      memoriesList.innerHTML = "";
+      for (const item of data.memories) {
+        const li = document.createElement("li");
+        li.textContent = item;
+        memoriesList.appendChild(li);
+      }
+    }
+
+    async function saveSettings() {
+      const openid = openidInput.value.trim();
+      if (!openid) return alert("请输入 OpenID");
+      await fetch(`/api/users/${encodeURIComponent(openid)}/memory/enabled`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: enabledInput.checked })
+      });
+      await loadSettings();
+    }
+
+    async function clearMemory() {
+      const openid = openidInput.value.trim();
+      if (!openid) return alert("请输入 OpenID");
+      await fetch(`/api/users/${encodeURIComponent(openid)}/memory/clear`, { method: "POST" });
+      await loadSettings();
+    }
+
+    document.querySelector("#load").addEventListener("click", loadSettings);
+    document.querySelector("#save").addEventListener("click", saveSettings);
+    document.querySelector("#clear").addEventListener("click", clearMemory);
+    if (openidInput.value) loadSettings();
+  </script>
+</body>
+</html>
+

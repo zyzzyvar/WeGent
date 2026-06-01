@@ -1,0 +1,2 @@
+"""WeGent assistant service."""
+
