@@ -185,7 +185,7 @@ https://example-name.trycloudflare.com/wechat/official/callback
 
 ## 阿里云 ECS 部署
 
-以下流程以 Ubuntu 22.04 / 24.04 为例。
+以下流程覆盖 Ubuntu/Debian 和 Alibaba Cloud Linux/CentOS/RHEL。阿里云 ECS 常见镜像不一定有 `apt`，请先确认系统类型。
 
 ### 1. 准备云资源
 
@@ -221,11 +221,38 @@ api.example.com -> 1.2.3.4
 ssh root@your-server-ip
 ```
 
-安装依赖：
+查看系统类型：
 
 ```bash
-apt update
-apt install -y git python3 python3-venv python3-pip nginx
+cat /etc/os-release
+```
+
+Ubuntu / Debian：
+
+```bash
+sudo apt update
+sudo apt install -y git python3 python3-venv python3-pip nginx
+```
+
+Alibaba Cloud Linux / CentOS / RHEL：
+
+```bash
+sudo yum install -y git python3 python3-pip nginx
+```
+
+如果系统提示没有 `yum`，再试：
+
+```bash
+sudo dnf install -y git python3 python3-pip nginx
+```
+
+安装完成后确认版本：
+
+```bash
+git --version
+python3 --version
+pip3 --version
+nginx -v
 ```
 
 ### 4. 拉取代码
@@ -240,6 +267,15 @@ cd WeGent
 
 ```bash
 python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+如果 `python3 -m venv .venv` 提示没有 `venv` 模块：
+
+```bash
+sudo yum install -y python3-virtualenv
+python3 -m virtualenv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 ```
@@ -540,4 +576,3 @@ pytest
 - 微信 XML 消息解析
 - 文本回复 XML 生成
 - 已入库消息不重复进入模型上下文
-
