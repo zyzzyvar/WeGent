@@ -69,6 +69,16 @@ class Database:
                     FOREIGN KEY(openid) REFERENCES users(openid) ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS user_skills (
+                    openid TEXT NOT NULL,
+                    skill_id TEXT NOT NULL,
+                    enabled INTEGER NOT NULL,
+                    installed_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(openid, skill_id),
+                    FOREIGN KEY(openid) REFERENCES users(openid) ON DELETE CASCADE
+                );
+
                 CREATE TABLE IF NOT EXISTS kv (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -81,6 +91,8 @@ class Database:
                     ON messages(openid, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_tasks_status_due
                     ON tasks(status, due_at);
+                CREATE INDEX IF NOT EXISTS idx_user_skills_openid
+                    ON user_skills(openid);
                 """
             )
 
@@ -135,6 +147,14 @@ class Database:
         with self.connect() as conn:
             cursor = conn.execute("DELETE FROM memories WHERE openid = ?", (openid,))
             return int(cursor.rowcount)
+
+    def delete_memory(self, openid: str, memory_id: int) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM memories WHERE openid = ? AND id = ?",
+                (openid, memory_id),
+            )
+            return cursor.rowcount == 1
 
     def record_message(
         self,
@@ -200,6 +220,40 @@ class Database:
                 )
             )
 
+    def list_tasks(
+        self,
+        openid: str,
+        statuses: tuple[str, ...] = ("pending", "running"),
+        limit: int = 10,
+    ) -> list[sqlite3.Row]:
+        if not statuses:
+            return []
+        placeholders = ", ".join("?" for _ in statuses)
+        with self.connect() as conn:
+            return list(
+                conn.execute(
+                    f"""
+                    SELECT * FROM tasks
+                    WHERE openid = ? AND status IN ({placeholders})
+                    ORDER BY due_at ASC, id ASC
+                    LIMIT ?
+                    """,
+                    (openid, *statuses, limit),
+                )
+            )
+
+    def cancel_task(self, openid: str, task_id: int) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE tasks
+                SET status = 'cancelled', updated_at = ?
+                WHERE openid = ? AND id = ? AND status = 'pending'
+                """,
+                (utc_now_iso(), openid, task_id),
+            )
+            return cursor.rowcount == 1
+
     def mark_task_running(self, task_id: int) -> bool:
         with self.connect() as conn:
             cursor = conn.execute(
@@ -223,6 +277,37 @@ class Database:
                 (status, result, utc_now_iso(), task_id),
             )
 
+    def set_skill_enabled(self, openid: str, skill_id: str, enabled: bool) -> None:
+        self.ensure_user(openid)
+        now = utc_now_iso()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO user_skills(openid, skill_id, enabled, installed_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(openid, skill_id) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    updated_at = excluded.updated_at
+                """,
+                (openid, skill_id, 1 if enabled else 0, now, now),
+            )
+
+    def skill_overrides(self, openid: str) -> dict[str, bool]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT skill_id, enabled FROM user_skills WHERE openid = ?",
+                (openid,),
+            ).fetchall()
+        return {row["skill_id"]: bool(row["enabled"]) for row in rows}
+
+    def is_skill_enabled(self, openid: str, skill_id: str, default: bool = False) -> bool:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT enabled FROM user_skills WHERE openid = ? AND skill_id = ?",
+                (openid, skill_id),
+            ).fetchone()
+        return default if row is None else bool(row["enabled"])
+
     def set_kv(self, key: str, value: Any, expires_at: int | None = None) -> None:
         payload = json.dumps(value, ensure_ascii=False)
         with self.connect() as conn:
@@ -244,4 +329,3 @@ class Database:
                 conn.execute("DELETE FROM kv WHERE key = ?", (key,))
                 return None
             return json.loads(row["value"])
-
