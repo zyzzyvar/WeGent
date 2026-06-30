@@ -34,6 +34,11 @@ app = FastAPI(title=settings.app_name)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
+def _static_html(filename: str) -> HTMLResponse:
+    with open(f"app/static/{filename}", "r", encoding="utf-8") as file:
+        return HTMLResponse(file.read())
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
@@ -49,6 +54,21 @@ async def on_shutdown() -> None:
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/", response_class=HTMLResponse)
+async def home_page() -> HTMLResponse:
+    return _static_html("home.html")
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_page() -> HTMLResponse:
+    return _static_html("privacy.html")
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_page() -> HTMLResponse:
+    return _static_html("terms.html")
 
 
 @app.get("/wechat/official/callback", response_class=PlainTextResponse)
@@ -110,8 +130,7 @@ async def receive_wechat_message(
 
 @app.get("/h5/settings", response_class=HTMLResponse)
 async def settings_page() -> HTMLResponse:
-    with open("app/static/settings.html", "r", encoding="utf-8") as file:
-        return HTMLResponse(file.read())
+    return _static_html("settings.html")
 
 
 @app.get("/api/users/{openid}/settings")
