@@ -1,4 +1,9 @@
+from dataclasses import replace
+
+from app.config import load_settings
+from app.db import Database
 from app.wechat import build_text_reply, parse_plaintext_message, verify_signature
+from app.wechat import WeChatOfficialClient
 
 
 def test_verify_signature() -> None:
@@ -34,3 +39,15 @@ def test_build_text_reply() -> None:
     assert "<ToUserName><![CDATA[openid_test]]></ToUserName>" in xml
     assert "<FromUserName><![CDATA[gh_test]]></FromUserName>" in xml
     assert "<Content><![CDATA[ok]]></Content>" in xml
+
+
+def test_access_token_cache_key_is_scoped_to_appid(tmp_path) -> None:
+    settings_a = replace(load_settings(), wechat_app_id="appid-a")
+    settings_b = replace(load_settings(), wechat_app_id="appid-b")
+    db = Database(tmp_path / "test.sqlite3")
+
+    client_a = WeChatOfficialClient(settings_a, db)
+    client_b = WeChatOfficialClient(settings_b, db)
+
+    assert client_a._access_token_cache_key() == "wechat_access_token:appid-a"
+    assert client_b._access_token_cache_key() == "wechat_access_token:appid-b"

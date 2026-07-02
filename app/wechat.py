@@ -72,7 +72,8 @@ class WeChatOfficialClient:
         self.db = db
 
     async def get_access_token(self) -> str:
-        cached = self.db.get_kv("wechat_access_token")
+        cache_key = self._access_token_cache_key()
+        cached = self.db.get_kv(cache_key)
         if cached and cached.get("access_token"):
             return str(cached["access_token"])
 
@@ -96,11 +97,14 @@ class WeChatOfficialClient:
 
         expires_in = max(int(data.get("expires_in", 7200)) - 300, 60)
         self.db.set_kv(
-            "wechat_access_token",
+            cache_key,
             {"access_token": data["access_token"]},
             expires_at=int(time.time()) + expires_in,
         )
         return str(data["access_token"])
+
+    def _access_token_cache_key(self) -> str:
+        return f"wechat_access_token:{self.settings.wechat_app_id}"
 
     async def send_text(self, openid: str, content: str) -> None:
         access_token = await self.get_access_token()
@@ -125,4 +129,3 @@ class WeChatOfficialClient:
 def _chunk_text(content: str, size: int) -> list[str]:
     text = content.strip() or "处理完成，但没有生成可发送的内容。"
     return [text[i : i + size] for i in range(0, len(text), size)]
-
