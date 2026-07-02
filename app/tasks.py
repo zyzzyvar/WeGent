@@ -51,6 +51,16 @@ class TaskRunner:
             if not self.db.mark_task_running(task["id"]):
                 continue
             try:
+                if self.settings.safety_mode and not self.settings.safety_allow_proactive_task_send:
+                    result = "安全模式下已禁止定时任务主动触达，任务结果未通过微信客服消息发送。"
+                    self.db.record_safety_event(
+                        task["openid"],
+                        "task_send_skipped",
+                        f"task #{task['id']} proactive send disabled",
+                    )
+                    self.db.complete_task(task["id"], result, status="done")
+                    continue
+
                 result = await self.assistant.handle_task(task["openid"], task["prompt"])
                 message = f"任务 #{task['id']} 完成：\n{result}"
                 await self.wechat.send_text(task["openid"], message)
@@ -58,4 +68,3 @@ class TaskRunner:
             except Exception as exc:  # noqa: BLE001 - keep runner alive.
                 logger.exception("Scheduled task %s failed", task["id"])
                 self.db.complete_task(task["id"], str(exc), status="failed")
-

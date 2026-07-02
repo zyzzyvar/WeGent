@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from app.assistant import AssistantService
@@ -14,9 +16,13 @@ class CapturingLLM:
         return "answer"
 
 
+def assistant_test_settings():
+    return replace(load_settings(), safety_mode=False)
+
+
 @pytest.mark.anyio
 async def test_current_message_is_not_duplicated_when_already_recorded(tmp_path) -> None:
-    settings = load_settings()
+    settings = assistant_test_settings()
     db = Database(tmp_path / "test.sqlite3")
     db.init()
     llm = CapturingLLM()
@@ -31,7 +37,7 @@ async def test_current_message_is_not_duplicated_when_already_recorded(tmp_path)
 
 @pytest.mark.anyio
 async def test_memory_is_user_scoped_and_can_delete_by_index(tmp_path) -> None:
-    settings = load_settings()
+    settings = assistant_test_settings()
     db = Database(tmp_path / "test.sqlite3")
     db.init()
     assistant = AssistantService(settings, db, CapturingLLM())
@@ -48,7 +54,7 @@ async def test_memory_is_user_scoped_and_can_delete_by_index(tmp_path) -> None:
 
 @pytest.mark.anyio
 async def test_task_list_and_cancel(tmp_path) -> None:
-    settings = load_settings()
+    settings = assistant_test_settings()
     db = Database(tmp_path / "test.sqlite3")
     db.init()
     assistant = AssistantService(settings, db, CapturingLLM())
@@ -66,7 +72,7 @@ async def test_task_list_and_cancel(tmp_path) -> None:
 
 @pytest.mark.anyio
 async def test_skill_toggle_controls_memory_prompt(tmp_path) -> None:
-    settings = load_settings()
+    settings = assistant_test_settings()
     db = Database(tmp_path / "test.sqlite3")
     db.init()
     llm = CapturingLLM()
@@ -87,7 +93,7 @@ async def test_skill_toggle_controls_memory_prompt(tmp_path) -> None:
 
 @pytest.mark.anyio
 async def test_skill_list_shows_planned_capabilities(tmp_path) -> None:
-    settings = load_settings()
+    settings = assistant_test_settings()
     db = Database(tmp_path / "test.sqlite3")
     db.init()
     assistant = AssistantService(settings, db, CapturingLLM())

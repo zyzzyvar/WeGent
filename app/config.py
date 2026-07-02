@@ -24,6 +24,11 @@ def _int_env(name: str, default: int) -> int:
     return int(value)
 
 
+def _csv_env(name: str) -> tuple[str, ...]:
+    value = os.getenv(name, "")
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str
@@ -45,6 +50,19 @@ class Settings:
     max_memory_items: int
     task_poll_interval_seconds: int
     system_prompt: str
+
+    safety_mode: bool
+    safety_require_openid_whitelist: bool
+    safety_allowed_openids: tuple[str, ...]
+    safety_admin_token: str
+    safety_max_text_chars: int
+    safety_max_messages_per_minute: int
+    safety_max_messages_per_day: int
+    safety_reply_prefix: str
+    safety_allow_memory: bool
+    safety_allow_task_creation: bool
+    safety_allow_proactive_task_send: bool
+    wechat_max_reply_chunks: int
 
 
 def load_settings() -> Settings:
@@ -73,4 +91,16 @@ def load_settings() -> Settings:
             "Be concise, helpful, and transparent that you are an AI assistant. "
             "When you are missing information, ask one clear follow-up question.",
         ),
+        safety_mode=_bool_env("SAFETY_MODE", True),
+        safety_require_openid_whitelist=_bool_env("SAFETY_REQUIRE_OPENID_WHITELIST", True),
+        safety_allowed_openids=_csv_env("SAFETY_ALLOWED_OPENIDS"),
+        safety_admin_token=os.getenv("SAFETY_ADMIN_TOKEN", ""),
+        safety_max_text_chars=_int_env("SAFETY_MAX_TEXT_CHARS", 800),
+        safety_max_messages_per_minute=_int_env("SAFETY_MAX_MESSAGES_PER_MINUTE", 3),
+        safety_max_messages_per_day=_int_env("SAFETY_MAX_MESSAGES_PER_DAY", 20),
+        safety_reply_prefix=os.getenv("SAFETY_REPLY_PREFIX", "[AI助手] "),
+        safety_allow_memory=_bool_env("SAFETY_ALLOW_MEMORY", True),
+        safety_allow_task_creation=_bool_env("SAFETY_ALLOW_TASK_CREATION", False),
+        safety_allow_proactive_task_send=_bool_env("SAFETY_ALLOW_PROACTIVE_TASK_SEND", False),
+        wechat_max_reply_chunks=_int_env("WECHAT_MAX_REPLY_CHUNKS", 1),
     )

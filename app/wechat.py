@@ -108,9 +108,9 @@ class WeChatOfficialClient:
 
     async def send_text(self, openid: str, content: str) -> None:
         access_token = await self.get_access_token()
-        chunks = _chunk_text(content, size=1800)
+        chunks = _chunk_text(self._label_reply(content), size=1800)
         async with httpx.AsyncClient(timeout=15) as client:
-            for chunk in chunks[:5]:
+            for chunk in chunks[: self.settings.wechat_max_reply_chunks]:
                 response = await client.post(
                     "https://api.weixin.qq.com/cgi-bin/message/custom/send",
                     params={"access_token": access_token},
@@ -124,6 +124,15 @@ class WeChatOfficialClient:
                 data = response.json()
                 if data.get("errcode") not in (0, None):
                     raise RuntimeError(f"Failed to send WeChat message: {data}")
+
+    def _label_reply(self, content: str) -> str:
+        if not self.settings.safety_mode:
+            return content
+        prefix = self.settings.safety_reply_prefix
+        text = content.strip()
+        if not prefix or text.startswith(prefix):
+            return text
+        return f"{prefix}{text}"
 
 
 def _chunk_text(content: str, size: int) -> list[str]:

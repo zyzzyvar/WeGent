@@ -85,6 +85,14 @@ class Database:
                     expires_at INTEGER
                 );
 
+                CREATE TABLE IF NOT EXISTS safety_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    openid TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    detail TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_memories_openid_created
                     ON memories(openid, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_messages_openid_created
@@ -93,6 +101,8 @@ class Database:
                     ON tasks(status, due_at);
                 CREATE INDEX IF NOT EXISTS idx_user_skills_openid
                     ON user_skills(openid);
+                CREATE INDEX IF NOT EXISTS idx_safety_events_created
+                    ON safety_events(created_at DESC);
                 """
             )
 
@@ -111,6 +121,20 @@ class Database:
     def get_user(self, openid: str) -> sqlite3.Row | None:
         with self.connect() as conn:
             return conn.execute("SELECT * FROM users WHERE openid = ?", (openid,)).fetchone()
+
+    def list_users(self, limit: int = 50) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            return list(
+                conn.execute(
+                    """
+                    SELECT openid, memory_enabled, created_at, updated_at
+                    FROM users
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+            )
 
     def set_memory_enabled(self, openid: str, enabled: bool) -> None:
         self.ensure_user(openid)
@@ -329,3 +353,27 @@ class Database:
                 conn.execute("DELETE FROM kv WHERE key = ?", (key,))
                 return None
             return json.loads(row["value"])
+
+    def record_safety_event(self, openid: str, event_type: str, detail: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO safety_events(openid, event_type, detail, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (openid, event_type, detail, utc_now_iso()),
+            )
+
+    def list_safety_events(self, limit: int = 50) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            return list(
+                conn.execute(
+                    """
+                    SELECT openid, event_type, detail, created_at
+                    FROM safety_events
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+            )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -10,6 +10,7 @@ from app.assistant import AssistantService
 from app.config import load_settings
 from app.db import Database
 from app.llm import LocalLLMClient
+from app.safety import SafetyGuard
 from app.tasks import TaskRunner
 from app.wechat import (
     WeChatOfficialClient,
@@ -28,6 +29,7 @@ db = Database(settings.db_path)
 llm = LocalLLMClient(settings)
 assistant = AssistantService(settings, db, llm)
 wechat = WeChatOfficialClient(settings, db)
+safety = SafetyGuard(settings, db)
 task_runner = TaskRunner(settings, db, assistant, wechat)
 
 app = FastAPI(title=settings.app_name)
@@ -106,23 +108,29 @@ async def receive_wechat_message(
     db.ensure_user(message.from_user)
 
     if message.msg_type == "event" and message.raw.get("Event") == "subscribe":
-        content = (
-            "你好，我是 WeGent 办事助手。你可以直接发问题、语音，"
-            "也可以发送“帮助”查看我现在支持的能力。"
-        )
-        return _xml_reply(message.from_user, message.to_user, content)
+        return _xml_reply(message.from_user, message.to_user, safety.subscribe_reply(message.from_user))
+
+    if message.msg_type == "event":
+        db.record_safety_event(message.from_user, "event", message.content)
+        return PlainTextResponse("success")
 
     if message.msg_type not in {"text", "voice"}:
-        content = "我已经收到这条消息。当前验证版先支持文字和可识别语音，文件上传会通过 H5/微信客服补上。"
+        db.record_safety_event(message.from_user, "blocked", f"unsupported message type: {message.msg_type}")
+        content = "当前内部验证版仅支持文字和可识别语音，暂不处理图片、文件、位置、链接等消息。"
         return _xml_reply(message.from_user, message.to_user, content)
 
+    decision = safety.review_user_message(message.from_user, message.content)
     inserted = db.record_message(
         openid=message.from_user,
         role="user",
         content=message.content,
         msg_id=message.msg_id,
+        status=decision.status,
     )
-    if inserted:
+    if decision.reply is not None:
+        return _xml_reply(message.from_user, message.to_user, decision.reply)
+
+    if inserted and decision.should_process:
         background_tasks.add_task(process_and_reply, message.from_user, message.content)
 
     return _xml_reply(message.from_user, message.to_user, settings.reply_ack_text)
@@ -134,7 +142,12 @@ async def settings_page() -> HTMLResponse:
 
 
 @app.get("/api/users/{openid}/settings")
-async def get_user_settings(openid: str) -> dict[str, object]:
+async def get_user_settings(
+    openid: str,
+    token: str = Query(""),
+    x_safety_token: str = Header("", alias="X-Safety-Token"),
+) -> dict[str, object]:
+    _require_admin_token(token or x_safety_token)
     db.ensure_user(openid)
     user = db.get_user(openid)
     memories = db.list_memories(openid, limit=50)
@@ -147,15 +160,38 @@ async def get_user_settings(openid: str) -> dict[str, object]:
 
 
 @app.post("/api/users/{openid}/memory/enabled")
-async def update_memory_enabled(openid: str, payload: dict[str, bool]) -> dict[str, bool]:
+async def update_memory_enabled(
+    openid: str,
+    payload: dict[str, bool],
+    token: str = Query(""),
+    x_safety_token: str = Header("", alias="X-Safety-Token"),
+) -> dict[str, bool]:
+    _require_admin_token(token or x_safety_token)
     enabled = bool(payload.get("enabled", True))
     db.set_memory_enabled(openid, enabled)
     return {"memory_enabled": enabled}
 
 
 @app.post("/api/users/{openid}/memory/clear")
-async def clear_user_memory(openid: str) -> dict[str, int]:
+async def clear_user_memory(
+    openid: str,
+    token: str = Query(""),
+    x_safety_token: str = Header("", alias="X-Safety-Token"),
+) -> dict[str, int]:
+    _require_admin_token(token or x_safety_token)
     return {"deleted": db.clear_memories(openid)}
+
+
+@app.get("/ops/safety/users")
+async def safety_users(
+    token: str = Query(""),
+    x_safety_token: str = Header("", alias="X-Safety-Token"),
+) -> dict[str, object]:
+    _require_admin_token(token or x_safety_token)
+    return {
+        "users": [dict(row) for row in db.list_users(limit=100)],
+        "events": [dict(row) for row in db.list_safety_events(limit=100)],
+    }
 
 
 async def process_and_reply(openid: str, content: str) -> None:
@@ -172,5 +208,12 @@ async def process_and_reply(openid: str, content: str) -> None:
 
 
 def _xml_reply(to_user: str, from_user: str, content: str) -> Response:
-    xml = build_text_reply(to_user=to_user, from_user=from_user, content=content)
+    xml = build_text_reply(to_user=to_user, from_user=from_user, content=safety.label_reply(content))
     return Response(content=xml, media_type="application/xml")
+
+
+def _require_admin_token(provided: str) -> None:
+    if not settings.safety_admin_token:
+        raise HTTPException(status_code=403, detail="SAFETY_ADMIN_TOKEN is not configured")
+    if provided != settings.safety_admin_token:
+        raise HTTPException(status_code=403, detail="Invalid safety admin token")

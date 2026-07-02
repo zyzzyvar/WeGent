@@ -10,6 +10,7 @@ WeGent 是一个面向微信服务号的个人 AI 办事助手验证项目。用
 - OpenAI-compatible 本地大模型网关
 - SQLite 用户记忆、技能开关和定时任务骨架
 - 简单 H5 设置页
+- 极保守安全模式：白名单、AI 身份标识、限频、高风险内容拦截、审计日志
 
 ## 架构
 
@@ -31,6 +32,7 @@ app/
   db.py                 SQLite 存储
   llm.py                本地大模型网关
   main.py               FastAPI 入口和微信回调
+  safety.py             白名单、限频、AI 标识和高风险内容拦截
   skills.py             内置技能注册表
   tasks.py              定时任务轮询
   wechat.py             微信签名、XML 解析、客服消息发送
@@ -61,6 +63,8 @@ tests/                  基础测试
 ```
 
 当前可直接使用的技能是“记忆”和“定时任务”。“语音”和“图片识别”已经进入技能注册表，后续接入 ASR/TTS、图片下载和视觉模型后即可启用。
+
+安全模式默认开启时，定时任务创建和主动推送默认关闭，需要明确配置后才会启用。
 
 ## 本地启动
 
@@ -104,6 +108,19 @@ LLM_API_KEY=
 
 DATA_DIR=./data
 TIMEZONE=Asia/Shanghai
+
+SAFETY_MODE=true
+SAFETY_REQUIRE_OPENID_WHITELIST=true
+SAFETY_ALLOWED_OPENIDS=
+SAFETY_ADMIN_TOKEN=change-this-long-random-token
+SAFETY_MAX_TEXT_CHARS=800
+SAFETY_MAX_MESSAGES_PER_MINUTE=3
+SAFETY_MAX_MESSAGES_PER_DAY=20
+SAFETY_REPLY_PREFIX=[AI助手] 
+SAFETY_ALLOW_MEMORY=true
+SAFETY_ALLOW_TASK_CREATION=false
+SAFETY_ALLOW_PROACTIVE_TASK_SEND=false
+WECHAT_MAX_REPLY_CHUNKS=1
 ```
 
 说明：
@@ -114,8 +131,72 @@ TIMEZONE=Asia/Shanghai
 - `LLM_BASE_URL`：OpenAI-compatible 大模型接口地址。
 - `LLM_MODEL`：模型名称。
 - `WECHAT_VERIFY_SIGNATURE`：正式环境保持 `true`。
+- `SAFETY_MODE`：安全模式总开关，验证阶段建议保持 `true`。
+- `SAFETY_REQUIRE_OPENID_WHITELIST`：是否只允许白名单 OpenID 使用，验证阶段建议保持 `true`。
+- `SAFETY_ALLOWED_OPENIDS`：允许使用的微信 OpenID，多个用英文逗号分隔。
+- `SAFETY_ADMIN_TOKEN`：安全管理接口口令，用于查询访问者 OpenID 和安全事件。
+- `SAFETY_ALLOW_TASK_CREATION`：是否允许用户创建定时任务，验证阶段建议保持 `false`。
+- `SAFETY_ALLOW_PROACTIVE_TASK_SEND`：是否允许定时任务到点后主动发微信客服消息，验证阶段建议保持 `false`。
+- `WECHAT_MAX_REPLY_CHUNKS`：单次客服消息最多发送几段，验证阶段建议保持 `1`。
 
 不要提交 `.env`。里面包含 AppSecret 等敏感信息。
+
+## 极保守安全模式
+
+没有任何代码能保证公众号 100% 不被平台限制。当前安全模式的目标是尽量降低触发风控的概率：
+
+- 只服务白名单 OpenID，陌生用户不会进入模型。
+- 首次对话只发送 AI 身份、风险边界、用户协议和隐私政策提示，不处理原问题。
+- 所有微信回复默认加 `[AI助手]` 前缀，避免被误认为真人客服。
+- 单用户限频：默认每分钟 3 条、每天 20 条。
+- 单次输入长度限制：默认 800 字。
+- 拦截违法违规、隐私凭证、医疗健康、法律合规、金融投资、色情低俗、暴力自伤等高风险请求。
+- 定时任务创建默认关闭；定时任务主动触达默认关闭。
+- 客服消息默认最多发送 1 段，避免长文本拆成多条造成刷屏观感。
+- 被拦截事件进入 `safety_events` 表，便于排查。
+
+### 白名单流程
+
+1. 让测试用户先关注服务号并发送任意消息。
+2. 系统会回复“仅面向内部白名单验证”，同时记录该用户 OpenID。
+3. 管理员查询最近用户和安全事件：
+
+```bash
+curl -H "X-Safety-Token: $SAFETY_ADMIN_TOKEN" \
+  https://your-domain.example/ops/safety/users
+```
+
+也可以直接查 SQLite：
+
+```bash
+sqlite3 data/wegent.sqlite3 \
+  "select openid, created_at, updated_at from users order by updated_at desc limit 20;"
+```
+
+4. 把允许测试的 OpenID 写入 `.env`：
+
+```env
+SAFETY_ALLOWED_OPENIDS=openid1,openid2
+```
+
+5. 重启服务：
+
+```bash
+sudo systemctl restart wegent
+```
+
+6. 让该用户重新发送消息。第一次会收到 AI 身份和风险边界提示；再发一次才会进入模型。
+
+### 验证阶段不要打开的能力
+
+以下能力会提升平台风险，验证阶段建议保持关闭：
+
+- 面向非白名单用户开放。
+- 主动定时任务推送。
+- 高频多段客服消息回复。
+- 文件、图片、位置、链接等复杂消息处理。
+- 让账号名称、头像、菜单或话术表现得像真人客服、真人经理。
+- 医疗、法律、投资、政务、身份认证、支付等高风险场景的确定性建议。
 
 ## 大模型接口要求
 
